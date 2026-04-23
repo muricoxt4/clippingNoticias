@@ -123,21 +123,6 @@ projetoClipping/
 `-- README.md
 ```
 
-## Arquivos locais
-
-Estes arquivos nao devem ir para o repositorio:
-
-- `.env`
-- `google-token.json`
-- `personas.json`
-- `*.log`
-
-## Seguranca
-
-- Credenciais e tokens ficam fora do versionamento via `.gitignore`
-- O OAuth do Google usa apenas os escopos necessarios para Docs e Drive
-- `personas.json` fica local, evitando versionar dados de clientes
-
 ## Licenca
 
 MIT
