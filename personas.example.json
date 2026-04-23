@@ -1,0 +1,12 @@
+[
+  {
+    "id": "id_unico",
+    "nome": "Nome do Cliente",
+    "descricao": "Descrição detalhada do perfil profissional e interesses do cliente. Quanto mais detalhado, melhor a curadoria. Inclua: cargo, setor, temas de interesse, áreas de atuação."
+  },
+  {
+    "id": "outro_cliente",
+    "nome": "Outro Cliente",
+    "descricao": "Exemplo: CEO de empresa de tecnologia. Interessa-se por: startups, inteligência artificial, mercado financeiro, gestão empresarial e inovação."
+  }
+]
