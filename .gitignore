@@ -1,12 +1,30 @@
 node_modules/
+
+# Local environment and secrets
 .env
 .env.*
 !.env.example
 google-token.json
 google-credentials.json
+*service-account*.json
+*credentials*.json
 personas.json
-claude_desktop_config.json
+
+# Local tooling
+.claude/
+.vscode/
+.idea/
+
+# Logs and temporary output
 *.log
 clipping.log
-.claude/
+news-history.json
+coverage/
+dist/
+tmp/
+temp/
+
+# OS files
 .DS_Store
+Thumbs.db
+claude_desktop_config.json

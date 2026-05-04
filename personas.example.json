@@ -2,11 +2,28 @@
   {
     "id": "id_unico",
     "nome": "Nome do Cliente",
-    "descricao": "Descrição detalhada do perfil profissional e interesses do cliente. Quanto mais detalhado, melhor a curadoria. Inclua: cargo, setor, temas de interesse, áreas de atuação."
+    "descricao": "Descricao objetiva do perfil profissional, contexto de negocio e temas centrais do cliente.",
+    "prioridades": [
+      "tema prioritario 1",
+      "tema prioritario 2"
+    ],
+    "evitar": [
+      "assunto fora de contexto",
+      "conteudo promocional ou muito tatico"
+    ]
   },
   {
     "id": "outro_cliente",
     "nome": "Outro Cliente",
-    "descricao": "Exemplo: CEO de empresa de tecnologia. Interessa-se por: startups, inteligência artificial, mercado financeiro, gestão empresarial e inovação."
+    "descricao": "Exemplo: CEO de empresa de tecnologia com foco em negocios, gestao e expansao.",
+    "prioridades": [
+      "mercado financeiro",
+      "resultados de empresas",
+      "inovacao com impacto em negocios"
+    ],
+    "evitar": [
+      "curiosidades sem impacto empresarial",
+      "conteudo de lifestyle"
+    ]
   }
 ]

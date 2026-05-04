@@ -15,14 +15,6 @@ if not exist .env (
     exit /b 1
 )
 
-if not exist google-token.json (
-    echo [AVISO] google-token.json nao encontrado.
-    echo Execute primeiro: node auth-google.js
-    echo.
-    pause
-    exit /b 1
-)
-
 if not exist node_modules (
     echo Instalando dependencias pela primeira vez...
     call npm install
@@ -35,6 +27,16 @@ if not exist node_modules (
 )
 
 echo Iniciando pipeline de clipping...
+echo.
+call node doctor.js
+if errorlevel 1 (
+    echo.
+    echo [ERRO] Validacao inicial falhou. Corrija a configuracao acima.
+    echo.
+    pause
+    exit /b 1
+)
+
 echo.
 node run.js
 echo.

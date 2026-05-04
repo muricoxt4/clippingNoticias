@@ -5,9 +5,14 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js",
-    "run-now": "node run.js"
+    "start": "node run.js",
+    "run-now": "node run.js",
+    "mcp": "node index.js",
+    "dev": "node --watch run.js",
+    "doctor": "node doctor.js",
+    "auth-google": "node auth-google.js",
+    "check": "node --check run.js && node --check index.js && node --check auth-google.js && node --check doctor.js && node --check lib/ai.js && node --check lib/errors.js && node --check lib/google.js && node --check lib/history.js && node --check lib/scraper.js && node --check lib/utils.js",
+    "test": "node test/run-tests.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.2",

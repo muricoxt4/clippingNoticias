@@ -1,6 +1,5 @@
 import { google } from 'googleapis';
 import { createServer } from 'http';
-import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -11,9 +10,15 @@ dotenv.config();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_PATH = path.join(__dirname, 'google-token.json');
 
-const CLIENT_ID     = process.env.GOOGLE_CLIENT_ID;
+const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const REDIRECT_URI  = 'http://localhost:4000/callback';
+const REDIRECT_URI = 'http://localhost:4000/callback';
+
+if (!CLIENT_ID || !CLIENT_SECRET) {
+  console.error('[ERRO] GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET sao obrigatorios para o fluxo OAuth.');
+  console.error('       Se voce usa service account, este script e opcional.');
+  process.exit(1);
+}
 
 const oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
 
@@ -28,17 +33,17 @@ const authUrl = oauth2Client.generateAuthUrl({
 
 console.log('\n=== Abra a URL abaixo no navegador ===');
 console.log(authUrl);
-console.log('======================================\n');
+console.log('=====================================\n');
 
 const server = createServer(async (req, res) => {
-  const url = new URL(req.url, REDIRECT_URI);
-  const code = url.searchParams.get('code');
+  const callbackUrl = new URL(req.url, REDIRECT_URI);
+  const code = callbackUrl.searchParams.get('code');
+  const error = callbackUrl.searchParams.get('error');
 
-  const error = url.searchParams.get('error');
   if (!code) {
     res.writeHead(400, { 'Content-Type': 'text/html' });
     res.end(`<h2>Erro no callback</h2><pre>URL recebida: ${req.url}\nErro Google: ${error ?? 'nenhum'}</pre>`);
-    console.error('Callback sem código. URL:', req.url);
+    console.error('Callback sem codigo. URL:', req.url);
     console.error('Erro Google:', error ?? 'nenhum');
     server.close();
     process.exit(1);
@@ -46,19 +51,36 @@ const server = createServer(async (req, res) => {
 
   try {
     const { tokens } = await oauth2Client.getToken(code);
-    fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens, null, 2));
+    const tokenPayload = {
+      ...tokens,
+      token_created_at: Date.now(),
+    };
+
+    fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokenPayload, null, 2));
 
     res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end('<h2>✅ Autenticação concluída! Pode fechar esta aba.</h2>');
+    res.end('<h2>Autenticacao concluida. Pode fechar esta aba.</h2>');
 
-    console.log('\n✅ Token salvo em google-token.json');
-    console.log('   Refresh token:', tokens.refresh_token ? 'OK' : '⚠️ não retornado (revogue o acesso em myaccount.google.com/permissions e tente novamente)');
+    console.log('\nToken salvo em google-token.json');
+    console.log(
+      'Refresh token:',
+      tokens.refresh_token
+        ? 'OK'
+        : 'nao retornado (revogue o acesso em myaccount.google.com/permissions e tente novamente)',
+    );
+
+    if (Number.isFinite(tokenPayload.refresh_token_expires_in)) {
+      const days = Math.round(tokenPayload.refresh_token_expires_in / 86400);
+      console.log(`Validade estimada do refresh token: ${days} dia(s).`);
+      console.log('Se o app OAuth estiver em modo Testing, mude para In production para evitar expiracao semanal.');
+    }
+
     server.close();
     process.exit(0);
-  } catch (e) {
-    res.writeHead(500);
-    res.end('Erro: ' + e.message);
-    console.error('Erro ao obter token:', e.message);
+  } catch (requestError) {
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(`Erro: ${requestError.message}`);
+    console.error('Erro ao obter token:', requestError.message);
     server.close();
     process.exit(1);
   }

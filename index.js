@@ -9,7 +9,14 @@ import Groq from 'groq-sdk';
 
 import { createBrowser, scrapeArticles, fetchArticleText } from './lib/scraper.js';
 import { summarize, filterByPersona } from './lib/ai.js';
-import { buildGoogleClients, createGoogleDoc } from './lib/google.js';
+import {
+  resolveGoogleAuthConfig,
+  buildGoogleClients,
+  createGoogleDoc,
+  resolveDocSharingConfig,
+  validateGoogleAccess,
+} from './lib/google.js';
+import { formatToolError } from './lib/errors.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -122,113 +129,127 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+  try {
+    const { name, arguments: args } = request.params;
 
-  if (name === 'fetch_portal_news') {
-    const daysBack    = args.days_back ?? parseInt(process.env.NEWS_DAYS_BACK ?? '3', 10);
-    const maxPerSite  = args.max_articles_per_site ?? 5;
-    const envSites    = (process.env.NEWS_SITES ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-    const sites       = args.sites?.length ? args.sites : envSites;
+    if (name === 'fetch_portal_news') {
+      const daysBack = args.days_back ?? parseInt(process.env.NEWS_DAYS_BACK ?? '3', 10);
+      const maxPerSite = args.max_articles_per_site ?? 5;
+      const envSites = (process.env.NEWS_SITES ?? '').split(',').map((site) => site.trim()).filter(Boolean);
+      const sites = args.sites?.length ? args.sites : envSites;
 
-    if (!sites.length) {
+      if (!sites.length) {
+        return {
+          content: [{ type: 'text', text: 'Nenhum portal configurado. Defina NEWS_SITES no .env ou passe "sites".' }],
+          isError: true,
+        };
+      }
+
+      const allArticles = [];
+      const browser = await createBrowser();
+
+      try {
+        for (const siteUrl of sites) {
+          try {
+            console.error(`[fetch] Acessando: ${siteUrl}`);
+            const { articles, meta } = await scrapeArticles(browser, siteUrl, daysBack);
+            const limited = articles.slice(0, maxPerSite);
+
+            if (!limited.length) {
+              const reason = meta.raw_count === 0
+                ? 'nenhum elemento compativel'
+                : meta.title_filtered === meta.raw_count
+                  ? 'possivel bloqueio anti-bot'
+                  : `${meta.date_filtered} artigos fora do periodo`;
+              allArticles.push({ site: siteUrl, articles_found: 0, reason });
+            }
+
+            for (const article of limited) {
+              console.error(`[fetch] Extraindo: ${article.link}`);
+              try {
+                article.text = await fetchArticleText(browser, article.link);
+              } catch {
+                article.text = '(nao foi possivel extrair o texto completo)';
+              }
+              allArticles.push({ site: siteUrl, ...article });
+            }
+          } catch (error) {
+            console.error(`[fetch] Erro em ${siteUrl}:`, error.message);
+            allArticles.push({ site: siteUrl, error: error.message });
+          }
+        }
+      } finally {
+        await browser.close();
+      }
+
+      return { content: [{ type: 'text', text: JSON.stringify(allArticles, null, 2) }] };
+    }
+
+    if (name === 'summarize_news_groq') {
+      const { title, text, link, model } = args;
+      const parsed = await summarize(groq, title, text, link, model);
+      return { content: [{ type: 'text', text: JSON.stringify(parsed, null, 2) }] };
+    }
+
+    if (name === 'generate_google_doc') {
+      const { doc_title, news_items, folder_id } = args;
+      const googleAuth = resolveGoogleAuthConfig(process.env, __dirname);
+      const docSharingConfig = resolveDocSharingConfig(process.env);
+      const targetFolder = folder_id?.trim() || process.env.GOOGLE_DRIVE_FOLDER_ID?.trim() || null;
+      const googleClients = buildGoogleClients(googleAuth);
+      const { docs, drive } = googleClients;
+      await validateGoogleAccess(googleAuth, googleClients, targetFolder);
+      const docLink = await createGoogleDoc(
+        docs,
+        drive,
+        doc_title,
+        news_items,
+        targetFolder,
+        googleAuth,
+        docSharingConfig,
+      );
+      const docId = docLink.match(/\/d\/([^/]+)\//)?.[1];
       return {
-        content : [{ type: 'text', text: 'Nenhum portal configurado. Defina NEWS_SITES no .env ou passe "sites".' }],
-        isError : true,
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ success: true, doc_id: docId, doc_link: docLink }, null, 2),
+        }],
       };
     }
 
-    const allArticles = [];
-    const browser     = await createBrowser();
-
-    try {
-      for (const siteUrl of sites) {
-        try {
-          console.error(`[fetch] Acessando: ${siteUrl}`);
-          const { articles, meta } = await scrapeArticles(browser, siteUrl, daysBack);
-          const limited = articles.slice(0, maxPerSite);
-
-          if (limited.length === 0) {
-            const reason = meta.raw_count === 0
-              ? 'nenhum elemento compativel'
-              : meta.title_filtered === meta.raw_count
-                ? 'possivel bloqueio anti-bot'
-                : `${meta.date_filtered} artigos fora do periodo`;
-            allArticles.push({ site: siteUrl, articles_found: 0, reason });
-          }
-
-          for (const article of limited) {
-            console.error(`[fetch] Extraindo: ${article.link}`);
-            try {
-              article.text = await fetchArticleText(browser, article.link);
-            } catch {
-              article.text = '(nao foi possivel extrair o texto completo)';
-            }
-            allArticles.push({ site: siteUrl, ...article });
-          }
-        } catch (err) {
-          console.error(`[fetch] Erro em ${siteUrl}:`, err.message);
-          allArticles.push({ site: siteUrl, error: err.message });
-        }
+    if (name === 'filter_news_by_persona') {
+      const { articles, persona_ids } = args;
+      const personasPath = path.join(__dirname, 'personas.json');
+      if (!fs.existsSync(personasPath)) {
+        return { content: [{ type: 'text', text: 'personas.json nao encontrado.' }], isError: true };
       }
-    } finally {
-      await browser.close();
+      const allPersonas = JSON.parse(fs.readFileSync(personasPath, 'utf8'));
+      const personas = persona_ids?.length
+        ? allPersonas.filter((persona) => persona_ids.includes(persona.id))
+        : allPersonas;
+
+      const result = {};
+      for (const persona of personas) {
+        const indices = await filterByPersona(groq, articles, persona);
+        result[persona.id] = {
+          persona_nome: persona.nome,
+          artigos: indices.map((index) => articles[index]).filter(Boolean),
+        };
+        console.error(`[filter] ${persona.nome}: ${indices.length} artigo(s) selecionado(s).`);
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     }
 
-    return { content: [{ type: 'text', text: JSON.stringify(allArticles, null, 2) }] };
-  }
-
-  if (name === 'summarize_news_groq') {
-    const { title, text, link, model } = args;
-    const parsed = await summarize(groq, title, text, link, model);
-    return { content: [{ type: 'text', text: JSON.stringify(parsed, null, 2) }] };
-  }
-
-  if (name === 'generate_google_doc') {
-    const { doc_title, news_items, folder_id } = args;
-    const tokenPath    = path.join(__dirname, 'google-token.json');
-    const targetFolder = folder_id || process.env.GOOGLE_DRIVE_FOLDER_ID || null;
-    const { docs, drive } = buildGoogleClients(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      tokenPath,
-    );
-    const docLink = await createGoogleDoc(docs, drive, doc_title, news_items, targetFolder);
-    const docId   = docLink.match(/\/d\/([^/]+)\//)?.[1];
     return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({ success: true, doc_id: docId, doc_link: docLink }, null, 2),
-      }],
+      content: [{ type: 'text', text: `Tool desconhecida: ${name}` }],
+      isError: true,
+    };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: formatToolError(error) }],
+      isError: true,
     };
   }
-
-  if (name === 'filter_news_by_persona') {
-    const { articles, persona_ids } = args;
-    const personasPath = path.join(__dirname, 'personas.json');
-    if (!fs.existsSync(personasPath)) {
-      return { content: [{ type: 'text', text: 'personas.json nao encontrado.' }], isError: true };
-    }
-    const allPersonas = JSON.parse(fs.readFileSync(personasPath, 'utf8'));
-    const personas    = persona_ids?.length
-      ? allPersonas.filter((p) => persona_ids.includes(p.id))
-      : allPersonas;
-
-    const result = {};
-    for (const persona of personas) {
-      const indices = await filterByPersona(groq, articles, persona);
-      result[persona.id] = {
-        persona_nome: persona.nome,
-        artigos     : indices.map((i) => articles[i]).filter(Boolean),
-      };
-      console.error(`[filter] ${persona.nome}: ${indices.length} artigo(s) selecionado(s).`);
-    }
-    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-  }
-
-  return {
-    content: [{ type: 'text', text: `Tool desconhecida: ${name}` }],
-    isError: true,
-  };
 });
 
 const transport = new StdioServerTransport();
