@@ -1,5 +1,6 @@
 import { google } from 'googleapis';
 import { createServer } from 'http';
+import { randomBytes } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -13,6 +14,7 @@ const TOKEN_PATH = path.join(__dirname, 'google-token.json');
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const REDIRECT_URI = 'http://localhost:4000/callback';
+const OAUTH_STATE = randomBytes(24).toString('hex');
 
 if (!CLIENT_ID || !CLIENT_SECRET) {
   console.error('[ERRO] GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET sao obrigatorios para o fluxo OAuth.');
@@ -25,6 +27,7 @@ const oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_U
 const authUrl = oauth2Client.generateAuthUrl({
   access_type: 'offline',
   prompt: 'consent',
+  state: OAUTH_STATE,
   scope: [
     'https://www.googleapis.com/auth/documents',
     'https://www.googleapis.com/auth/drive',
@@ -39,6 +42,15 @@ const server = createServer(async (req, res) => {
   const callbackUrl = new URL(req.url, REDIRECT_URI);
   const code = callbackUrl.searchParams.get('code');
   const error = callbackUrl.searchParams.get('error');
+  const state = callbackUrl.searchParams.get('state');
+
+  if (state !== OAUTH_STATE) {
+    res.writeHead(400, { 'Content-Type': 'text/html' });
+    res.end('<h2>Estado OAuth invalido. Feche esta aba e execute o fluxo novamente.</h2>');
+    console.error('Callback OAuth com state invalido.');
+    server.close();
+    process.exit(1);
+  }
 
   if (!code) {
     res.writeHead(400, { 'Content-Type': 'text/html' });

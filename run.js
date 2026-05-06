@@ -21,12 +21,13 @@ import {
   resolveGoogleAuthConfig,
   buildGoogleClients,
   createGoogleDoc,
-  findLatestClippingDocForPersona,
+  findRecentClippingDocsForPersona,
   formatClippingDocTitle,
   readGoogleDocText,
   resolveDocSharingConfig,
   validateGoogleAccess,
 } from './lib/google.js';
+import { validatePersonas } from './lib/personas.js';
 import { printPipelineFailure, printPipelineWarnings } from './lib/errors.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -121,22 +122,37 @@ function parseNewsItemsFromDocText(documentText) {
     .map((line) => line.trim())
     .filter(Boolean);
   const newsItems = [];
-  let currentTitle = null;
+  let currentItem = null;
 
   for (const line of lines) {
+    if (/^CLIPPING DE NOTICIAS\b/i.test(line)) {
+      continue;
+    }
+
     const titleMatch = line.match(/^\d+\.\s+(.+)$/);
     if (titleMatch) {
-      currentTitle = titleMatch[1].trim();
+      currentItem = {
+        title: titleMatch[1].trim(),
+        chamada: titleMatch[1].trim(),
+        resumoLines: [],
+      };
       continue;
     }
 
     const linkMatch = line.match(/^Link:\s+(https?:\/\/\S+)$/i);
-    if (linkMatch) {
+    if (linkMatch && currentItem) {
       newsItems.push({
-        title: currentTitle ?? linkMatch[1],
+        title: currentItem.title,
+        chamada: currentItem.chamada,
+        resumo: currentItem.resumoLines.join(' ').trim(),
         link: linkMatch[1],
       });
-      currentTitle = null;
+      currentItem = null;
+      continue;
+    }
+
+    if (currentItem) {
+      currentItem.resumoLines.push(line);
     }
   }
 
@@ -169,6 +185,7 @@ async function closeBrowserSafely(browser) {
 
 async function hydrateHistoryFromPreviousDocs(history, historyConfig, personas, docs, drive, folderId) {
   let importedPersonas = 0;
+  let importedDocs = 0;
   let importedArticles = 0;
 
   for (const persona of personas) {
@@ -177,21 +194,35 @@ async function hydrateHistoryFromPreviousDocs(history, historyConfig, personas, 
     }
 
     try {
-      const latestDoc = await findLatestClippingDocForPersona(drive, persona.nome, folderId);
-      if (!latestDoc) continue;
+      const recentDocs = await findRecentClippingDocsForPersona(
+        drive,
+        persona.nome,
+        folderId,
+        historyConfig.lookbackDays,
+      );
+      if (!recentDocs.length) continue;
 
-      const documentText = await readGoogleDocText(docs, latestDoc.id);
-      const importedItems = parseNewsItemsFromDocText(documentText);
-      if (!importedItems.length) continue;
+      let importedAnythingForPersona = false;
 
-      recordSentArticles(history, persona, importedItems, {
-        docTitle: latestDoc.name ?? null,
-        docLink: latestDoc.webViewLink ?? `https://docs.google.com/document/d/${latestDoc.id}/edit`,
-        sentAt: latestDoc.modifiedTime ?? new Date().toISOString(),
-        lookbackDays: historyConfig.lookbackDays,
-      });
-      importedPersonas += 1;
-      importedArticles += importedItems.length;
+      for (const doc of recentDocs) {
+        const documentText = await readGoogleDocText(docs, doc.id);
+        const importedItems = parseNewsItemsFromDocText(documentText);
+        if (!importedItems.length) continue;
+
+        recordSentArticles(history, persona, importedItems, {
+          docTitle: doc.name ?? null,
+          docLink: doc.webViewLink ?? `https://docs.google.com/document/d/${doc.id}/edit`,
+          sentAt: doc.modifiedTime ?? new Date().toISOString(),
+          lookbackDays: historyConfig.lookbackDays,
+        });
+        importedAnythingForPersona = true;
+        importedDocs += 1;
+        importedArticles += importedItems.length;
+      }
+
+      if (importedAnythingForPersona) {
+        importedPersonas += 1;
+      }
     } catch (error) {
       log(`Historico previo nao carregado para ${persona.nome}: ${error.message.slice(0, 90)}`);
     }
@@ -201,7 +232,7 @@ async function hydrateHistoryFromPreviousDocs(history, historyConfig, personas, 
     saveNewsHistory(historyConfig, history);
   }
 
-  return { importedPersonas, importedArticles };
+  return { importedPersonas, importedDocs, importedArticles };
 }
 
 async function main() {
@@ -210,7 +241,7 @@ async function main() {
 
   try {
     const { sites, googleAuth, personasPath, historyConfig } = validateEnv();
-    const personas = JSON.parse(fs.readFileSync(personasPath, 'utf8'));
+    const personas = validatePersonas(JSON.parse(fs.readFileSync(personasPath, 'utf8')));
     const history = loadNewsHistory(historyConfig);
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
     const googleFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID?.trim() || null;
@@ -238,7 +269,8 @@ async function main() {
     log(`Compartilhamento Google Docs: ${docSharingConfig.mode}`);
     if (importedHistory.importedArticles > 0) {
       log(
-        `Historico inicial carregado de ${importedHistory.importedPersonas} doc(s) anterior(es): ` +
+        `Historico inicial carregado de ${importedHistory.importedDocs} doc(s) anterior(es) ` +
+        `para ${importedHistory.importedPersonas} persona(s): ` +
         `${importedHistory.importedArticles} artigo(s)`,
       );
     }

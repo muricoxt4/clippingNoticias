@@ -1,19 +1,23 @@
 import assert from 'node:assert/strict';
 
 import {
+  buildHistoryPromptContext,
   dedupeArticles,
   filterSelectionAgainstHistory,
   normalizeArticleLink,
   recordSentArticles,
   resolveNewsHistoryConfig,
 } from '../lib/history.js';
+import { filterByPersona } from '../lib/ai.js';
 import {
+  filterClippingDocsForPersona,
   formatClippingDocDate,
   formatClippingDocTitle,
   isClippingDocTitleForPersona,
   resolveDocSharingConfig,
 } from '../lib/google.js';
-import { isValidTitle } from '../lib/utils.js';
+import { validatePersonas } from '../lib/personas.js';
+import { isValidTitle, isWithinDays, parseDate } from '../lib/utils.js';
 
 const tests = [
   {
@@ -54,6 +58,153 @@ const tests = [
     },
   },
   {
+    name: 'filterSelectionAgainstHistory matches original title even after summary headline changes',
+    run() {
+      const history = { version: 1, personas: {} };
+      recordSentArticles(
+        history,
+        { id: 'marcos' },
+        [{
+          title: 'Empresa anuncia aquisicao bilionaria no setor de energia',
+          chamada: 'Gigante fecha acordo historico',
+          link: 'https://site.com/energia/aquisicao-antiga',
+        }],
+        { lookbackDays: 14 },
+      );
+
+      const result = filterSelectionAgainstHistory(
+        [0],
+        [{
+          title: 'Empresa anuncia aquisicao bilionaria no setor de energia',
+          link: 'https://site.com/energia/aquisicao-nova',
+        }],
+        history,
+        'marcos',
+        10,
+      );
+
+      assert.deepEqual(result.keptIndices, []);
+      assert.equal(result.removedCount, 1);
+    },
+  },
+  {
+    name: 'recordSentArticles stores link, chamada and resumo in history',
+    run() {
+      const history = { version: 1, personas: {} };
+      recordSentArticles(
+        history,
+        { id: 'marcos' },
+        [{
+          title: 'Empresa anuncia aquisicao bilionaria no setor de energia',
+          chamada: 'Gigante fecha acordo historico',
+          resumo: 'A companhia confirmou a compra e detalhou impacto financeiro esperado.',
+          link: 'https://site.com/energia/aquisicao',
+        }],
+        { lookbackDays: 14 },
+      );
+
+      assert.deepEqual(history.personas.marcos[0], {
+        title: 'Empresa anuncia aquisicao bilionaria no setor de energia',
+        chamada: 'Gigante fecha acordo historico',
+        resumo: 'A companhia confirmou a compra e detalhou impacto financeiro esperado.',
+        link: 'https://site.com/energia/aquisicao',
+        normalizedLink: 'https://site.com/energia/aquisicao',
+        titleKey: 'empresa anuncia aquisicao bilionaria no setor de energia',
+        titleKeys: [
+          'empresa anuncia aquisicao bilionaria no setor de energia',
+          'gigante fecha acordo historico',
+        ],
+        sourceTitleKey: 'site.com::empresa anuncia aquisicao bilionaria no setor de energia',
+        sourceTitleKeys: [
+          'site.com::empresa anuncia aquisicao bilionaria no setor de energia',
+          'site.com::gigante fecha acordo historico',
+        ],
+        source: null,
+        sentAt: history.personas.marcos[0].sentAt,
+        docTitle: null,
+        docLink: null,
+      });
+    },
+  },
+  {
+    name: 'buildHistoryPromptContext includes title, chamada, resumo and link with compact formatting',
+    run() {
+      const history = {
+        version: 1,
+        personas: {
+          marcos: [{
+            title: 'Empresa anuncia aquisicao bilionaria no setor de energia',
+            chamada: 'Gigante fecha acordo historico',
+            resumo: 'A companhia confirmou a compra e detalhou impacto financeiro esperado.',
+            link: 'https://site.com/energia/aquisicao',
+            sentAt: '2026-05-06T12:00:00Z',
+          }],
+        },
+      };
+
+      assert.deepEqual(
+        buildHistoryPromptContext(history, 'marcos'),
+        [
+          'Titulo original: Empresa anuncia aquisicao bilionaria no setor de energia | ' +
+          'Chamada enviada: Gigante fecha acordo historico | ' +
+          'Resumo enviado: A companhia confirmou a compra e detalhou impacto financeiro esperado. | ' +
+          'Link: https://site.com/energia/aquisicao',
+        ],
+      );
+    },
+  },
+  {
+    name: 'filterByPersona preserves original article indices after skipping invalid entries',
+    async run() {
+      const groq = {
+        chat: {
+          completions: {
+            create: async () => ({
+              choices: [{ message: { content: '{"selecionados":[2]}' } }],
+            }),
+          },
+        },
+      };
+
+      const indices = await filterByPersona(
+        groq,
+        [
+          { error: 'portal indisponivel' },
+          { articles_found: 0, reason: 'nenhum item' },
+          { title: 'Empresa anuncia aquisicao', link: 'https://site.com/m1' },
+        ],
+        { id: 'marcos', nome: 'Marcos', descricao: 'Executivo de negocios' },
+      );
+
+      assert.deepEqual(indices, [2]);
+    },
+  },
+  {
+    name: 'filterByPersona returns empty when there are no valid articles',
+    async run() {
+      const groq = {
+        chat: {
+          completions: {
+            create: async () => {
+              throw new Error('nao deveria chamar a IA sem artigos validos');
+            },
+          },
+        },
+      };
+
+      const indices = await filterByPersona(
+        groq,
+        [
+          { error: 'portal indisponivel' },
+          { articles_found: 0, reason: 'nenhum item' },
+        ],
+        { id: 'marcos', nome: 'Marcos', descricao: 'Executivo de negocios' },
+      );
+
+      assert.deepEqual(indices, []);
+    },
+  },
+  {
     name: 'resolveNewsHistoryConfig blocks paths outside project',
     run() {
       assert.throws(
@@ -62,6 +213,18 @@ const tests = [
           'C:\\repo',
         ),
         /NEWS_HISTORY_PATH deve apontar para um arquivo dentro do projeto/,
+      );
+    },
+  },
+  {
+    name: 'validatePersonas rejects duplicate ids',
+    run() {
+      assert.throws(
+        () => validatePersonas([
+          { id: 'marcos', nome: 'Marcos', descricao: 'Executivo' },
+          { id: 'marcos', nome: 'Marcos 2', descricao: 'Outro executivo' },
+        ]),
+        /campo "id" duplicado/,
       );
     },
   },
@@ -120,6 +283,49 @@ const tests = [
         isClippingDocTitleForPersona('Clipping Marcos Fernandes - 06/05/2026', 'Marcos Fernandes'),
         true,
       );
+    },
+  },
+  {
+    name: 'filterClippingDocsForPersona keeps only matching docs within lookback',
+    run() {
+      const files = [
+        { name: '06-05-2026 | Marcos Fernandes', modifiedTime: '2026-05-06T12:00:00Z' },
+        { name: 'Clipping Marcos Fernandes - 02/05/2026', modifiedTime: '2026-05-02T12:00:00Z' },
+        { name: '28-04-2026 | Marcos Fernandes', modifiedTime: '2026-04-28T12:00:00Z' },
+        { name: '06-05-2026 | Outro Cliente', modifiedTime: '2026-05-06T12:00:00Z' },
+      ];
+
+      const filtered = filterClippingDocsForPersona(
+        files,
+        'Marcos Fernandes',
+        7,
+        new Date('2026-05-06T15:00:00Z'),
+      );
+
+      assert.deepEqual(
+        filtered.map((file) => file.name),
+        [
+          '06-05-2026 | Marcos Fernandes',
+          'Clipping Marcos Fernandes - 02/05/2026',
+        ],
+      );
+    },
+  },
+  {
+    name: 'parseDate understands accented relative PT-BR dates',
+    run() {
+      const parsed = parseDate('há 2 horas');
+      assert.equal(parsed instanceof Date, true);
+      assert.equal(Number.isNaN(parsed.getTime()), false);
+      assert.equal(isWithinDays(parsed, 1), true);
+    },
+  },
+  {
+    name: 'parseDate keeps relative days outside tight lookback',
+    run() {
+      const parsed = parseDate('há 3 dias');
+      assert.equal(parsed instanceof Date, true);
+      assert.equal(isWithinDays(parsed, 1), false);
     },
   },
   {

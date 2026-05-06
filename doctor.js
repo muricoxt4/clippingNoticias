@@ -9,6 +9,7 @@ import {
   resolveDocSharingConfig,
   validateGoogleAccess,
 } from './lib/google.js';
+import { validatePersonas } from './lib/personas.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,31 +23,6 @@ function fail(message) {
 
 function ok(message) {
   console.log(`[OK] ${message}`);
-}
-
-function isNonEmptyString(value) {
-  return typeof value === 'string' && value.trim().length > 0;
-}
-
-function isOptionalStringArray(value) {
-  return value == null || (
-    Array.isArray(value)
-    && value.every((item) => typeof item === 'string' && item.trim().length > 0)
-  );
-}
-
-function validatePersonas(personas) {
-  if (!Array.isArray(personas) || !personas.length) {
-    fail('personas.json esta vazio ou invalido.');
-  }
-
-  personas.forEach((persona, index) => {
-    if (!isNonEmptyString(persona.id)) fail(`persona ${index + 1}: campo "id" ausente ou invalido.`);
-    if (!isNonEmptyString(persona.nome)) fail(`persona ${index + 1}: campo "nome" ausente ou invalido.`);
-    if (!isNonEmptyString(persona.descricao)) fail(`persona ${index + 1}: campo "descricao" ausente ou invalido.`);
-    if (!isOptionalStringArray(persona.prioridades)) fail(`persona ${persona.id}: campo "prioridades" invalido.`);
-    if (!isOptionalStringArray(persona.evitar)) fail(`persona ${persona.id}: campo "evitar" invalido.`);
-  });
 }
 
 async function main() {

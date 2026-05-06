@@ -34,15 +34,31 @@ Saida:
 
 O arquivo [`run.js`](./run.js) le os sites configurados no `.env` e usa [`lib/scraper.js`](./lib/scraper.js) para encontrar titulos, links e datas.
 
+Quando o portal expõe datas relativas em PT-BR, o parser tambem entende formatos como `há 2 horas`, `há 3 dias` e `ontem` para respeitar `NEWS_DAYS_BACK`.
+
 ### 2. Limpeza
 
 Antes de chamar a IA, o pipeline remove duplicados por link normalizado e por titulo/origem usando [`lib/history.js`](./lib/history.js).
 
 ### 3. Anti-repeticao
 
-O projeto mantem um historico local em `news-history.json`. Esse arquivo registra os links ja enviados para cada persona e bloqueia reenvio dentro da janela configurada por `NEWS_REPEAT_LOOKBACK_DAYS`.
+O projeto mantem um historico local em `news-history.json`. Esse arquivo registra por persona:
 
-Se o historico local ainda nao existir, o pipeline tenta bootstrapar o contexto buscando o ultimo Doc daquela persona no Google Drive.
+- `link`
+- `title` (titulo original do artigo, quando disponivel)
+- `chamada`
+- `resumo`
+- chaves normalizadas de comparacao
+- `sentAt`
+- `docTitle`
+- `docLink`
+
+Esse historico e usado de duas formas:
+
+1. comparacao deterministica no codigo para bloquear repeticao exata por link e por identidade normalizada do artigo
+2. envio de um recorte compacto do historico recente para a IA, para ela evitar repeticao semantica mesmo quando o titulo atual vier reescrito
+
+Se o historico local ainda nao existir, o pipeline tenta bootstrapar o contexto buscando os Docs recentes daquela persona no Google Drive dentro da janela de lookback.
 
 ### 4. Selecao por persona
 
@@ -52,9 +68,11 @@ Se o historico local ainda nao existir, o pipeline tenta bootstrapar o contexto 
 - descricao de cada persona
 - prioridades
 - lista de assuntos a evitar
-- noticias recentes ja enviadas
+- recorte compacto das noticias recentes ja enviadas, incluindo titulo, chamada, resumo e link
 
 Com isso, a IA devolve os indices dos artigos relevantes para cada persona.
+
+Para controlar custo, o projeto nao envia o historico inteiro para a IA. Ele manda apenas uma janela pequena dos itens mais recentes, enquanto o restante continua sendo comparado localmente no codigo.
 
 ### 5. Resumo
 
@@ -86,6 +104,7 @@ projetoClipping/
 |   |-- errors.js
 |   |-- google.js
 |   |-- history.js
+|   |-- personas.js
 |   |-- scraper.js
 |   `-- utils.js
 |-- test/
@@ -156,7 +175,7 @@ Copie `personas.example.json` para `personas.json`.
 
 Campos esperados por persona:
 
-- `id`
+- `id` unico
 - `nome`
 - `descricao`
 - `prioridades` (opcional)
@@ -211,7 +230,7 @@ Depois execute:
 npm run auth-google
 ```
 
-Isso gera `google-token.json` localmente.
+Isso gera `google-token.json` localmente. O fluxo usa `state` no callback local para reduzir risco de troca indevida de codigo OAuth.
 
 ## Como executar
 
@@ -226,6 +245,7 @@ Esse comando valida:
 - `.env`
 - `personas.json`
 - estrutura das personas
+- `id` unico por persona
 - autenticacao Google
 - permissao de escrita na pasta do Drive
 - modo de compartilhamento do Doc
@@ -265,6 +285,11 @@ As tools expostas por [`index.js`](./index.js) sao:
 - `summarize_news_groq`
 - `filter_news_by_persona`
 - `generate_google_doc`
+
+Observacao:
+
+- `fetch_portal_news` e `generate_google_doc` nao dependem da Groq
+- `summarize_news_groq` e `filter_news_by_persona` exigem `GROQ_API_KEY`
 
 Exemplo de configuracao:
 
@@ -311,6 +336,12 @@ Se voce quiser permitir que noticias antigas voltem a entrar:
 - edite o arquivo manualmente
 
 No proximo run, o historico e recriado automaticamente.
+
+### Impacto em token
+
+O historico rico com `title`, `chamada`, `resumo` e `link` fica salvo localmente sem custo adicional.
+
+O custo de token so acontece quando parte desse historico e enviada para a IA. Para evitar inflacao de custo, o projeto manda apenas um recorte recente e resumido do historico por persona, em vez do arquivo inteiro.
 
 ## Publicacao no Git e arquivos locais
 

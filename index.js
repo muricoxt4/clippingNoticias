@@ -16,13 +16,24 @@ import {
   resolveDocSharingConfig,
   validateGoogleAccess,
 } from './lib/google.js';
+import { validatePersonas } from './lib/personas.js';
 import { formatToolError } from './lib/errors.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, '.env') });
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+function getGroqClient() {
+  const apiKey = process.env.GROQ_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error(
+      '[ERRO] GROQ_API_KEY nao configurada.\n' +
+      '       Defina a chave no .env para usar as tools de IA do servidor MCP.',
+    );
+  }
+
+  return new Groq({ apiKey });
+}
 
 const server = new Server(
   { name: 'mcp-news-automation', version: '1.0.0' },
@@ -130,13 +141,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
-    const { name, arguments: args } = request.params;
+    const { name } = request.params;
+    const args = request.params.arguments ?? {};
 
     if (name === 'fetch_portal_news') {
-      const daysBack = args.days_back ?? parseInt(process.env.NEWS_DAYS_BACK ?? '3', 10);
-      const maxPerSite = args.max_articles_per_site ?? 5;
+      const daysBack = typeof args.days_back === 'number'
+        ? args.days_back
+        : parseInt(process.env.NEWS_DAYS_BACK ?? '3', 10);
+      const maxPerSite = typeof args.max_articles_per_site === 'number'
+        ? args.max_articles_per_site
+        : 5;
       const envSites = (process.env.NEWS_SITES ?? '').split(',').map((site) => site.trim()).filter(Boolean);
-      const sites = args.sites?.length ? args.sites : envSites;
+      const sites = Array.isArray(args.sites) && args.sites.length ? args.sites : envSites;
 
       if (!sites.length) {
         return {
@@ -187,6 +203,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === 'summarize_news_groq') {
       const { title, text, link, model } = args;
+      const groq = getGroqClient();
       const parsed = await summarize(groq, title, text, link, model);
       return { content: [{ type: 'text', text: JSON.stringify(parsed, null, 2) }] };
     }
@@ -219,11 +236,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === 'filter_news_by_persona') {
       const { articles, persona_ids } = args;
+      const groq = getGroqClient();
       const personasPath = path.join(__dirname, 'personas.json');
       if (!fs.existsSync(personasPath)) {
         return { content: [{ type: 'text', text: 'personas.json nao encontrado.' }], isError: true };
       }
-      const allPersonas = JSON.parse(fs.readFileSync(personasPath, 'utf8'));
+      const allPersonas = validatePersonas(JSON.parse(fs.readFileSync(personasPath, 'utf8')));
       const personas = persona_ids?.length
         ? allPersonas.filter((persona) => persona_ids.includes(persona.id))
         : allPersonas;
