@@ -7,7 +7,12 @@ import {
   recordSentArticles,
   resolveNewsHistoryConfig,
 } from '../lib/history.js';
-import { resolveDocSharingConfig } from '../lib/google.js';
+import {
+  formatClippingDocDate,
+  formatClippingDocTitle,
+  isClippingDocTitleForPersona,
+  resolveDocSharingConfig,
+} from '../lib/google.js';
 import { isValidTitle } from '../lib/utils.js';
 
 const tests = [
@@ -81,6 +86,39 @@ const tests = [
       assert.throws(
         () => resolveDocSharingConfig({ GOOGLE_DOC_SHARE_MODE: 'public' }),
         /GOOGLE_DOC_SHARE_MODE invalido/,
+      );
+    },
+  },
+  {
+    name: 'formatClippingDocDate uses DD-MM-AAAA',
+    run() {
+      assert.equal(formatClippingDocDate(new Date('2026-05-06T12:00:00Z')), '06-05-2026');
+    },
+  },
+  {
+    name: 'formatClippingDocTitle uses date and persona name',
+    run() {
+      assert.equal(
+        formatClippingDocTitle('Marcos Fernandes', new Date('2026-05-06T12:00:00Z')),
+        '06-05-2026 | Marcos Fernandes',
+      );
+    },
+  },
+  {
+    name: 'isClippingDocTitleForPersona accepts current format',
+    run() {
+      assert.equal(
+        isClippingDocTitleForPersona('06-05-2026 | Marcos Fernandes', 'Marcos Fernandes'),
+        true,
+      );
+    },
+  },
+  {
+    name: 'isClippingDocTitleForPersona accepts legacy format',
+    run() {
+      assert.equal(
+        isClippingDocTitleForPersona('Clipping Marcos Fernandes - 06/05/2026', 'Marcos Fernandes'),
+        true,
       );
     },
   },

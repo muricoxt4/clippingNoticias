@@ -1,3 +1,4 @@
+# Dependencies
 node_modules/
 
 # Local environment and secrets
@@ -5,10 +6,20 @@ node_modules/
 .env.*
 !.env.example
 google-token.json
+google-token*.json
 google-credentials.json
+google-credentials*.json
 *service-account*.json
 *credentials*.json
+*.pem
+*.p12
+*.key
+*.crt
+*.cer
 personas.json
+personas.local.json
+news-history.json
+news-history*.json
 
 # Local tooling
 .claude/
@@ -17,12 +28,17 @@ personas.json
 
 # Logs and temporary output
 *.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
 clipping.log
-news-history.json
 coverage/
 dist/
 tmp/
 temp/
+.cache/
+*.tmp
+*.bak
 
 # OS files
 .DS_Store

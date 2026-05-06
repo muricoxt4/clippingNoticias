@@ -22,6 +22,7 @@ import {
   buildGoogleClients,
   createGoogleDoc,
   findLatestClippingDocForPersona,
+  formatClippingDocTitle,
   readGoogleDocText,
   resolveDocSharingConfig,
   validateGoogleAccess,
@@ -409,7 +410,7 @@ async function main() {
 
     state.currentStep = '5/5 - Criando Google Docs';
     log('[5/5] Criando Google Docs por persona...');
-    const today = new Date().toLocaleDateString('pt-BR');
+    const runDate = new Date();
 
     for (const { persona, artigos } of Object.values(porPersona)) {
       state.currentPersona = persona.nome;
@@ -424,7 +425,7 @@ async function main() {
         resumo: article.resumo ?? '',
         link: article.link,
       }));
-      const docTitle = `Clipping ${persona.nome} - ${today}`;
+      const docTitle = formatClippingDocTitle(persona.nome, runDate);
 
       const docLink = await createGoogleDoc(
         docs,
