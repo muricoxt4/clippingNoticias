@@ -7,17 +7,17 @@ import {
   normalizeArticleLink,
   recordSentArticles,
   resolveNewsHistoryConfig,
-} from '../lib/history.js';
-import { filterByPersona } from '../lib/ai.js';
+} from '../src/lib/history.js';
+import { filterByPersona } from '../src/lib/ai.js';
 import {
   filterClippingDocsForPersona,
   formatClippingDocDate,
   formatClippingDocTitle,
   isClippingDocTitleForPersona,
   resolveDocSharingConfig,
-} from '../lib/google.js';
-import { validatePersonas } from '../lib/personas.js';
-import { isValidTitle, isWithinDays, parseDate } from '../lib/utils.js';
+} from '../src/lib/google.js';
+import { validatePersonas } from '../src/lib/personas.js';
+import { isValidTitle, isWithinDays, parseDate } from '../src/lib/utils.js';
 
 const tests = [
   {

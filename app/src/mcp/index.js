@@ -2,26 +2,23 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
 import Groq from 'groq-sdk';
 
-import { createBrowser, scrapeArticles, fetchArticleText } from './lib/scraper.js';
-import { summarize, filterByPersona } from './lib/ai.js';
+import { createBrowser, scrapeArticles, fetchArticleText } from '../lib/scraper.js';
+import { summarize, filterByPersona } from '../lib/ai.js';
 import {
   resolveGoogleAuthConfig,
   buildGoogleClients,
   createGoogleDoc,
   resolveDocSharingConfig,
   validateGoogleAccess,
-} from './lib/google.js';
-import { validatePersonas } from './lib/personas.js';
-import { formatToolError } from './lib/errors.js';
+} from '../lib/google.js';
+import { validatePersonas } from '../lib/personas.js';
+import { formatToolError } from '../lib/errors.js';
+import { APP_ROOT, ENV_PATH, PERSONAS_PATH } from '../lib/paths.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
-dotenv.config({ path: path.join(__dirname, '.env') });
+dotenv.config({ path: ENV_PATH });
 
 function getGroqClient() {
   const apiKey = process.env.GROQ_API_KEY?.trim();
@@ -210,7 +207,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === 'generate_google_doc') {
       const { doc_title, news_items, folder_id } = args;
-      const googleAuth = resolveGoogleAuthConfig(process.env, __dirname);
+      const googleAuth = resolveGoogleAuthConfig(process.env, APP_ROOT);
       const docSharingConfig = resolveDocSharingConfig(process.env);
       const targetFolder = folder_id?.trim() || process.env.GOOGLE_DRIVE_FOLDER_ID?.trim() || null;
       const googleClients = buildGoogleClients(googleAuth);
@@ -237,11 +234,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'filter_news_by_persona') {
       const { articles, persona_ids } = args;
       const groq = getGroqClient();
-      const personasPath = path.join(__dirname, 'personas.json');
-      if (!fs.existsSync(personasPath)) {
+      if (!fs.existsSync(PERSONAS_PATH)) {
         return { content: [{ type: 'text', text: 'personas.json nao encontrado.' }], isError: true };
       }
-      const allPersonas = validatePersonas(JSON.parse(fs.readFileSync(personasPath, 'utf8')));
+      const allPersonas = validatePersonas(JSON.parse(fs.readFileSync(PERSONAS_PATH, 'utf8')));
       const personas = persona_ids?.length
         ? allPersonas.filter((persona) => persona_ids.includes(persona.id))
         : allPersonas;

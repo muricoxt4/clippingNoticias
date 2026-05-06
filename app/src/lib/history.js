@@ -1,7 +1,15 @@
 import fs from 'fs';
 import path from 'path';
+import {
+  DATA_DIR,
+  DEFAULT_HISTORY_PATH,
+  ENV_PATH,
+  REPO_ROOT,
+  formatCandidatePaths,
+  resolveCompatibleProjectPath,
+} from './paths.js';
 
-const DEFAULT_HISTORY_FILENAME = 'news-history.json';
+const DEFAULT_HISTORY_FILENAME = path.join('data', 'news-history.json');
 const DEFAULT_LOOKBACK_DAYS = 14;
 const MAX_HISTORY_ITEMS_FOR_PROMPT = 8;
 const HISTORY_PROMPT_TITLE_LIMIT = 140;
@@ -22,9 +30,14 @@ function readPositiveInt(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function isPathInsideProject(projectRoot, targetPath) {
-  const relativePath = path.relative(projectRoot, targetPath);
-  return Boolean(relativePath) && !relativePath.startsWith('..') && !path.isAbsolute(relativePath);
+function isPathInsideAnyRoot(targetPath, allowedRoots) {
+  return allowedRoots.some((allowedRoot) => {
+    const relativePath = path.relative(allowedRoot, targetPath);
+    return (
+      relativePath === ''
+      || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath))
+    );
+  });
 }
 
 function createEmptyHistory() {
@@ -183,14 +196,22 @@ function keepRecentEntries(entries, lookbackDays) {
 
 export function resolveNewsHistoryConfig(env, projectRoot) {
   const configuredPath = env.NEWS_HISTORY_PATH?.trim();
+  const allowedRoots = [projectRoot, REPO_ROOT];
   const historyPath = configuredPath
-    ? (path.isAbsolute(configuredPath) ? configuredPath : path.resolve(projectRoot, configuredPath))
-    : path.join(projectRoot, DEFAULT_HISTORY_FILENAME);
+    ? resolveCompatibleProjectPath(configuredPath, {
+      preferredBase: projectRoot,
+      fallbackBases: [path.dirname(ENV_PATH), REPO_ROOT],
+      fallbackPaths: [
+        path.join(DATA_DIR, path.basename(configuredPath)),
+        path.join(REPO_ROOT, 'data', path.basename(configuredPath)),
+      ],
+    }).path
+    : DEFAULT_HISTORY_PATH;
 
-  if (!isPathInsideProject(projectRoot, historyPath)) {
+  if (!isPathInsideAnyRoot(historyPath, allowedRoots)) {
     throw new Error(
       `[ERRO] NEWS_HISTORY_PATH deve apontar para um arquivo dentro do projeto.\n` +
-      `       Projeto: ${projectRoot}\n` +
+      `       Raizes permitidas: ${formatCandidatePaths(allowedRoots)}\n` +
       `       Caminho resolvido: ${historyPath}`,
     );
   }

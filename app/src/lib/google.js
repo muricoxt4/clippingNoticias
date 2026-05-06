@@ -1,6 +1,14 @@
 import { google } from 'googleapis';
 import fs from 'fs';
 import path from 'path';
+import {
+  CREDENTIALS_DIR,
+  ENV_PATH,
+  GOOGLE_TOKEN_PATH,
+  REPO_ROOT,
+  resolveCompatibleProjectPath,
+  formatCandidatePaths,
+} from './paths.js';
 
 const GOOGLE_REDIRECT_URI = 'http://localhost:4000/callback';
 const GOOGLE_SCOPES = [
@@ -88,28 +96,35 @@ export function resolveDocSharingConfig(env) {
   return { mode: rawMode };
 }
 
-function resolveConfigPath(projectRoot, configuredPath) {
-  return path.isAbsolute(configuredPath)
-    ? configuredPath
-    : path.resolve(projectRoot, configuredPath);
+function resolveConfigPath(projectRoot, configuredPath, fallbackPaths = []) {
+  return resolveCompatibleProjectPath(configuredPath, {
+    preferredBase: projectRoot,
+    fallbackBases: [path.dirname(ENV_PATH), REPO_ROOT],
+    fallbackPaths,
+  });
 }
 
-function readGoogleTokens(tokenPath) {
+function readGoogleTokens(tokenPath, searchedPaths = [tokenPath]) {
   if (!fs.existsSync(tokenPath)) {
-    throw new Error(`google-token.json nao encontrado em "${tokenPath}". Execute: node auth-google.js`);
+    const checkedPaths = formatCandidatePaths(searchedPaths);
+    throw new Error(
+      `google-token.json nao encontrado em "${tokenPath}". ` +
+      `Caminhos verificados: ${checkedPaths}. Execute: npm run auth-google`,
+    );
   }
 
   try {
     return JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
   } catch {
-    throw new Error(`Nao foi possivel ler "${tokenPath}". Gere novamente com: node auth-google.js`);
+    throw new Error(`Nao foi possivel ler "${tokenPath}". Gere novamente com: npm run auth-google`);
   }
 }
 
-function readServiceAccountCredentials(serviceAccountPath) {
+function readServiceAccountCredentials(serviceAccountPath, searchedPaths = [serviceAccountPath]) {
   if (!fs.existsSync(serviceAccountPath)) {
     throw new Error(
       `Arquivo da service account nao encontrado em "${serviceAccountPath}". ` +
+      `Caminhos verificados: ${formatCandidatePaths(searchedPaths)}. ` +
       'Baixe a chave JSON e ajuste GOOGLE_SERVICE_ACCOUNT_PATH.',
     );
   }
@@ -161,7 +176,7 @@ function buildReauthMessage(tokenPath, tokens, reason) {
   const lines = [
     '[ERRO] A autenticacao do Google nao esta valida.',
     `       Motivo: ${reason}`,
-    '       Execute novamente: node auth-google.js',
+    '       Execute novamente: npm run auth-google',
   ];
 
   const expiry = getRefreshTokenExpiry(tokenPath, tokens);
@@ -247,8 +262,16 @@ function normalizeServiceAccountError(error, authConfig, folderId = null) {
 export function resolveGoogleAuthConfig(env, projectRoot) {
   const serviceAccountSetting = env.GOOGLE_SERVICE_ACCOUNT_PATH?.trim();
   if (serviceAccountSetting) {
-    const serviceAccountPath = resolveConfigPath(projectRoot, serviceAccountSetting);
-    const credentials = readServiceAccountCredentials(serviceAccountPath);
+    const serviceAccountFileName = path.basename(serviceAccountSetting);
+    const resolvedServiceAccount = resolveConfigPath(projectRoot, serviceAccountSetting, [
+      path.join(CREDENTIALS_DIR, serviceAccountFileName),
+      path.join(REPO_ROOT, 'credentials', serviceAccountFileName),
+    ]);
+    const serviceAccountPath = resolvedServiceAccount.path;
+    const credentials = readServiceAccountCredentials(
+      serviceAccountPath,
+      resolvedServiceAccount.candidates,
+    );
 
     return {
       mode: 'service_account',
@@ -275,7 +298,7 @@ export function resolveGoogleAuthConfig(env, projectRoot) {
     mode: 'oauth',
     clientId,
     clientSecret,
-    tokenPath: path.join(projectRoot, 'google-token.json'),
+    tokenPath: GOOGLE_TOKEN_PATH,
   };
 }
 
@@ -298,7 +321,7 @@ export function buildGoogleClients(authConfig) {
 
   const tokens = readGoogleTokens(authConfig.tokenPath);
   if (!tokens.refresh_token) {
-    throw new Error(`"${path.basename(authConfig.tokenPath)}" nao contem refresh_token. Execute: node auth-google.js`);
+    throw new Error(`"${path.basename(authConfig.tokenPath)}" nao contem refresh_token. Execute: npm run auth-google`);
   }
 
   const refreshTokenExpiry = getRefreshTokenExpiry(authConfig.tokenPath, tokens);

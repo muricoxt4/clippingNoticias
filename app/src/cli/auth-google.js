@@ -2,14 +2,10 @@ import { google } from 'googleapis';
 import { createServer } from 'http';
 import { randomBytes } from 'crypto';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { CREDENTIALS_DIR, ENV_PATH, GOOGLE_TOKEN_PATH, toRepoRelative } from '../lib/paths.js';
 
-dotenv.config();
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TOKEN_PATH = path.join(__dirname, 'google-token.json');
+dotenv.config({ path: ENV_PATH });
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -68,12 +64,13 @@ const server = createServer(async (req, res) => {
       token_created_at: Date.now(),
     };
 
-    fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokenPayload, null, 2));
+    fs.mkdirSync(CREDENTIALS_DIR, { recursive: true });
+    fs.writeFileSync(GOOGLE_TOKEN_PATH, JSON.stringify(tokenPayload, null, 2));
 
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end('<h2>Autenticacao concluida. Pode fechar esta aba.</h2>');
 
-    console.log('\nToken salvo em google-token.json');
+    console.log(`\nToken salvo em ${toRepoRelative(GOOGLE_TOKEN_PATH)}`);
     console.log(
       'Refresh token:',
       tokens.refresh_token

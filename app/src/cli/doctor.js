@@ -1,6 +1,4 @@
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
 import {
@@ -8,13 +6,11 @@ import {
   buildGoogleClients,
   resolveDocSharingConfig,
   validateGoogleAccess,
-} from './lib/google.js';
-import { validatePersonas } from './lib/personas.js';
+} from '../lib/google.js';
+import { validatePersonas } from '../lib/personas.js';
+import { APP_ROOT, ENV_PATH, PERSONAS_PATH } from '../lib/paths.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dotenv.config({ path: path.join(__dirname, '.env') });
+dotenv.config({ path: ENV_PATH });
 
 function fail(message) {
   console.error(`[ERRO] ${message}`);
@@ -26,22 +22,20 @@ function ok(message) {
 }
 
 async function main() {
-  const envPath = path.join(__dirname, '.env');
-  if (!fs.existsSync(envPath)) fail('.env nao encontrado.');
+  if (!fs.existsSync(ENV_PATH)) fail('.env nao encontrado.');
   ok('.env encontrado');
 
   if (!process.env.GROQ_API_KEY) fail('GROQ_API_KEY nao configurada.');
   ok('GROQ_API_KEY configurada');
 
-  const personasPath = path.join(__dirname, 'personas.json');
-  if (!fs.existsSync(personasPath)) fail('personas.json nao encontrado.');
+  if (!fs.existsSync(PERSONAS_PATH)) fail('personas.json nao encontrado.');
   ok('personas.json encontrado');
 
-  const personas = JSON.parse(fs.readFileSync(personasPath, 'utf8'));
+  const personas = JSON.parse(fs.readFileSync(PERSONAS_PATH, 'utf8'));
   validatePersonas(personas);
   ok(`${personas.length} persona(s) carregada(s)`);
 
-  const googleAuth = resolveGoogleAuthConfig(process.env, __dirname);
+  const googleAuth = resolveGoogleAuthConfig(process.env, APP_ROOT);
   ok(`Autenticacao Google: ${googleAuth.mode}`);
   const docSharingConfig = resolveDocSharingConfig(process.env);
   ok(`Compartilhamento Docs: ${docSharingConfig.mode}`);
